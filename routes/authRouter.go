@@ -37,7 +37,8 @@ type PasswordResetRequest struct {
 type PasswordResetAttempt struct {
 	Email string `validate:"required,email"`
 	Code string `validate:"required"`
-	Password string `validate:"required"`
+	Password string `validate:"required,min=8,max=64,eqfield=ConfirmPassword"`
+	ConfirmPassword string `validate:"required,min=8,max=64"`
 }
 
 type RequestBody interface {
@@ -157,7 +158,11 @@ func ResetPassword(w http.ResponseWriter, r *http.Request) {
 		GenericAuthError(w, err, utils.GENERIC_PASSWORD_RESET_ERROR)
 		return
 	}
-	err, errMessage := dbhelper.VerifyPasswordResetCode(passwordResetAttempt.Email, passwordResetAttempt.Code, passwordHash)
+	err, errMessage := dbhelper.VerifyPasswordResetCode(
+		passwordResetAttempt.Email, 
+		passwordResetAttempt.Code, 
+		passwordHash,
+	)
 	if err != nil {
 		GenericAuthError(w, err, errMessage)
 		return

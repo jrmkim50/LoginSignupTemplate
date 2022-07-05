@@ -25,7 +25,8 @@ func OpenDB() error {
 
 func InitDB() error {
 	return DB.AutoMigrate(
-		&models.User{}, 
+		&models.User{},
+		&models.LoginAttempts{}, 
 		&models.PasswordResetAttempts{},
 		&models.PasswordResetCode{}, 
 		&models.RefreshToken{},

@@ -20,15 +20,15 @@ func LoginUserWithPassword(email, password string) (utils.JWT_TOKEN, utils.JWT_T
 	if err != nil {
 		return accessToken, refreshToken, err, utils.GENERIC_LOGIN_ERROR
 	}
-	if time.Now().After(loginAttempts.BanExpiresAt) && loginAttempts.NumAttempts == utils.MAX_NUM_LOGIN_ATTEMPTS {
+	if time.Now().After(loginAttempts.BanExpiresAt) {
 		loginAttempts.NumAttempts = 0
 	}
 	result := tx.Raw("SELECT * FROM users WHERE email = ?", email).Scan(&user)
 	if result.Error != nil {
 		return accessToken, refreshToken, result.Error, utils.GENERIC_LOGIN_ERROR
 	}
-	passwordCompare := utils.ComparePasswords(user.PasswordHash, password)
-	loginValid := loginAttempts.NumAttempts < utils.MAX_NUM_LOGIN_ATTEMPTS && result.RowsAffected > 0 && passwordCompare != nil
+	compareErr := utils.ComparePasswords(user.PasswordHash, password)
+	loginValid := loginAttempts.NumAttempts < utils.MAX_NUM_LOGIN_ATTEMPTS && result.RowsAffected > 0 && compareErr == nil
 	accessToken, err = utils.CreateToken(user.DisplayName, "access")
 	if err != nil {
 		return accessToken, refreshToken, err, utils.GENERIC_LOGIN_ERROR
@@ -113,7 +113,7 @@ func CreatePasswordResetCode(email string) (error, string) {
 	if err != nil {
 		return err, utils.GENERIC_PASSWORD_RESET_REQUEST_ERROR
 	}
-	if time.Now().After(resetAttempts.RequestsBanExpiresAt) && resetAttempts.NumRequests == utils.MAX_NUM_PASS_RESET_CODES {
+	if time.Now().After(resetAttempts.RequestsBanExpiresAt) {
 		resetAttempts.NumRequests = 0
 	}
 	userResult := tx.Raw("SELECT * FROM users WHERE email = ?", email).Scan(&user)
@@ -161,16 +161,18 @@ func VerifyPasswordResetCode(email, code, passwordHash string) (error, string) {
 	if err != nil {
 		return err, utils.GENERIC_PASSWORD_RESET_REQUEST_ERROR
 	}
-	if time.Now().After(resetAttempts.AttemptsBanExpiresAt) && resetAttempts.NumAttempts == utils.MAX_NUM_PASS_RESET_ATTEMPTS {
+	if time.Now().After(resetAttempts.AttemptsBanExpiresAt) {
 		resetAttempts.NumAttempts = 0
 	}
 	userResult := tx.Raw("SELECT * FROM users WHERE email = ?", email).Scan(&user)
 	if userResult.Error != nil {
 		return userResult.Error, utils.GENERIC_PASSWORD_RESET_ERROR
 	}
-	userExists := userResult.RowsAffected > 0
-	codeErr := tx.Model(&user).Where("code = ?", code).Association("PasswordResetCode").Find(&resetCode)
-	codeValid := userExists && codeErr != nil && time.Now().Before(resetCode.CodeExpiresAt)
+	codeResult := tx.Raw("SELECT * FROM password_reset_codes WHERE user_id = ? AND code = ?", user.ID, code).Scan(&resetCode)
+	if codeResult.Error != nil {
+		return codeResult.Error, utils.GENERIC_PASSWORD_RESET_ERROR
+	}
+	codeValid := codeResult.RowsAffected > 0 && time.Now().Before(resetCode.CodeExpiresAt)
 	if resetAttempts.NumAttempts < utils.MAX_NUM_PASS_RESET_ATTEMPTS {
 		if codeValid  {
 			resetAttempts.NumAttempts = 0
@@ -179,7 +181,11 @@ func VerifyPasswordResetCode(email, code, passwordHash string) (error, string) {
 			if updateResult.Error != nil {
 				return updateResult.Error, utils.GENERIC_PASSWORD_RESET_ERROR
 			}
-			deleteResult := tx.Delete(&models.RefreshToken{}, "user_id = ?", user.ID)
+			codeDelete := tx.Exec("DELETE FROM password_reset_codes WHERE id = ?", resetCode.ID)
+			if codeDelete.Error != nil {
+				return codeDelete.Error, utils.GENERIC_PASSWORD_RESET_ERROR
+			}
+			deleteResult := tx.Exec("DELETE FROM refresh_tokens WHERE user_id = ?", user.ID)
 			if deleteResult.Error != nil {
 				return deleteResult.Error, utils.GENERIC_PASSWORD_RESET_ERROR
 			}
@@ -196,7 +202,7 @@ func VerifyPasswordResetCode(email, code, passwordHash string) (error, string) {
 	if resetAttempts.NumAttempts < utils.MAX_NUM_PASS_RESET_ATTEMPTS {
 		return nil, ""
 	} else {
-		errorMessage := "Password reset attempt unsuccessful. " + utils.GenerateBanMessage(resetAttempts.AttemptsBanExpiresAt)
+		errorMessage := "We had some trouble resetting your password. " + utils.GenerateBanMessage(resetAttempts.AttemptsBanExpiresAt)
 		return errors.New(errorMessage), errorMessage
 	}
 }
