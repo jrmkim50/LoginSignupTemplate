@@ -14,6 +14,7 @@ const DISPLAY_NAME_TAKEN_SIGNUP_ERROR = "Someone is already using that display n
 const GENERIC_LOGIN_ERROR = "We had some trouble logging you in. Please try again!"
 const GENERIC_PASSWORD_RESET_REQUEST_ERROR = "We had some trouble getting you a verification code. Please try again!"
 const GENERIC_PASSWORD_RESET_ERROR = "We had some trouble resetting your password. Please try again!"
+
 const GENERIC_RATE_LIMIT_ERROR = "We had some trouble getting you a verification code. Please try again!"
 
 // ban durations
@@ -27,3 +28,4 @@ const CODE_DURATION = 20
 
 const LOGIN_BAN_DURATION = 10
 const RESET_PASSWORD_REQUEST_BAN_DURATION = 10
+const RESET_PASSWORD_BAN_DURATION = 10

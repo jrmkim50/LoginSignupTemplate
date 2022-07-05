@@ -39,6 +39,8 @@ type PasswordResetCode struct {
 
 type RefreshToken struct {
 	gorm.Model
+	UserID uint
+	User User
 	TokenString string
 	TokenExpiresAt time.Time
 }

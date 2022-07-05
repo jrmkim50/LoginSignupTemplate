@@ -34,8 +34,14 @@ type PasswordResetRequest struct {
 	Email string `validate:"required,email"`
 }
 
+type PasswordResetAttempt struct {
+	Email string `validate:"required,email"`
+	Code string `validate:"required"`
+	Password string `validate:"required"`
+}
+
 type RequestBody interface {
-	SignupAttempt | LoginAttempt | PasswordResetRequest
+	SignupAttempt | LoginAttempt | PasswordResetRequest | PasswordResetAttempt
 }
 
 func AuthRouter(s *mux.Router) {
@@ -136,10 +142,28 @@ func RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(StatusResponse{
-		Status: "New verification code sent!",
+		Status: "Check your email! A verification code has been sent if an account was found with this email.",
 	})
 }
 
 func ResetPassword(w http.ResponseWriter, r *http.Request) {
-
+	passwordResetAttempt, err := DecodeValidBody[PasswordResetAttempt](r)
+	if err != nil {
+		GenericAuthError(w, err, utils.GENERIC_PASSWORD_RESET_ERROR)
+		return
+	}
+	passwordHash, err := utils.HashPassword(passwordResetAttempt.Password)
+	if err != nil {
+		GenericAuthError(w, err, utils.GENERIC_PASSWORD_RESET_ERROR)
+		return
+	}
+	err, errMessage := dbhelper.VerifyPasswordResetCode(passwordResetAttempt.Email, passwordResetAttempt.Code, passwordHash)
+	if err != nil {
+		GenericAuthError(w, err, errMessage)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(StatusResponse{
+		Status: "The password has been reset if an account was found with this email! Please log in now.",
+	})
 }
