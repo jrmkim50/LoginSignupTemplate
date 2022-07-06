@@ -155,7 +155,9 @@ func VerifyPasswordResetCode(email, code, passwordHash string) (error, string) {
 	var resetAttempts models.PasswordResetAttempts
 	var user models.User
 	var resetCode models.PasswordResetCode
-	resetAttempts, err := _GetPasswordResetAttempts(tx, email)
+	// Block logins from happening
+	_, err := _GetLoginAttempts(tx, email)
+	resetAttempts, err = _GetPasswordResetAttempts(tx, email)
 	if err != nil {
 		return err, utils.GENERIC_PASSWORD_RESET_REQUEST_ERROR
 	}
