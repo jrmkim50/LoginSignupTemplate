@@ -189,6 +189,7 @@ func VerifyPasswordResetCode(email, code, passwordHash string) (error, string) {
 			if deleteResult.Error != nil {
 				return deleteResult.Error, utils.GENERIC_PASSWORD_RESET_ERROR
 			}
+			// send email notifying of password change
 		} else {
 			resetAttempts.NumAttempts++
 			resetAttempts.AttemptsBanExpiresAt = time.Now().Add(time.Minute * utils.RESET_PASSWORD_BAN_DURATION)
@@ -205,6 +206,27 @@ func VerifyPasswordResetCode(email, code, passwordHash string) (error, string) {
 		errorMessage := "We had some trouble resetting your password. " + utils.GenerateBanMessage(resetAttempts.AttemptsBanExpiresAt)
 		return errors.New(errorMessage), errorMessage
 	}
+}
+
+func RefreshTokenExists(displayName, tokenString string) bool {
+	tx := DB.Begin()
+	defer tx.Rollback()
+	var user models.User
+	var refreshToken models.RefreshToken
+	tx.Raw("SELECT * FROM users WHERE display_name = ?", displayName).Scan(&user)
+	tokenResult := tx.Raw(
+		"SELECT * FROM refresh_tokens WHERE token_string = ? AND user_id = ?", 
+		tokenString, 
+		user.ID,
+	).Scan(&refreshToken)
+	tx.Commit()
+	if tokenResult.Error != nil || tokenResult.RowsAffected == 0 {
+		return false;
+	}
+	if time.Now().After(refreshToken.TokenExpiresAt) {
+		return false;
+	}
+	return true;
 }
 
 func GetLoginAttempts(tx *gorm.DB, email string) (models.LoginAttempts, error) {
