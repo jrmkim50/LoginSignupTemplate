@@ -14,7 +14,7 @@ func main() {
 	// Setting up environment variables
 	err := godotenv.Load()
 	if err != nil {
-    		log.Fatal(err)
+  	log.Fatal(err)
 	}
 	// Setting up logs
 	file, err := os.OpenFile("logs.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
