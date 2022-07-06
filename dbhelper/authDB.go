@@ -162,7 +162,7 @@ func VerifyPasswordResetCode(email, code, passwordHash string) (error, string) {
 	if time.Now().After(resetAttempts.AttemptsBanExpiresAt) {
 		resetAttempts.NumAttempts = 0
 	}
-	userResult := tx.Raw("SELECT * FROM users WHERE email = ?", email).Scan(&user)
+	userResult := tx.Raw("SELECT * FROM users WHERE email = ? FOR UPDATE", email).Scan(&user)
 	if userResult.Error != nil {
 		return userResult.Error, utils.GENERIC_PASSWORD_RESET_ERROR
 	}
