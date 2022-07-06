@@ -42,5 +42,4 @@ type RefreshToken struct {
 	UserID uint
 	User User
 	TokenString string
-	TokenExpiresAt time.Time
 }

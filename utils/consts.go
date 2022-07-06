@@ -14,6 +14,13 @@ const REFRESH_TYPE = "refresh"
 // error messages
 const GORM_ERR_CODE_DUPLICATE_KEY = "Error 1062"
 
+const SERVER_DOWN = "The server is having some time processing this request right now. Please try again in a bit!"
+
+const MISSING_REQUEST_DATA = "Your request is missing a few things. Please try again!"
+
+const JWT_TOKEN_EXPIRED_ERROR = "Your account identifier has expired. Please log in again."
+const JWT_TOKEN_PARSING_ERROR = "Your account identifier was misformatted. Please login again."
+
 const EMAIL_TAKEN_SIGNUP_ERROR = "Someone might have signed up with that email before. Please try logging in!"
 const DISPLAY_NAME_TAKEN_SIGNUP_ERROR = "Someone might have signed up with that display name before! Please choose a different one!"
 

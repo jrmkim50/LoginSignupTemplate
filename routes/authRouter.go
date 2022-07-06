@@ -41,8 +41,12 @@ type PasswordResetAttempt struct {
 	ConfirmPassword string `validate:"required,min=8,max=64"`
 }
 
+type RefreshTokenBody struct {
+	TokenString string `validate:"required"`
+}
+
 type RequestBody interface {
-	SignupAttempt | LoginAttempt | PasswordResetRequest | PasswordResetAttempt
+	SignupAttempt | LoginAttempt | PasswordResetRequest | PasswordResetAttempt | RefreshTokenBody
 }
 
 func AuthRouter(s *mux.Router) {
@@ -50,6 +54,7 @@ func AuthRouter(s *mux.Router) {
 	s.HandleFunc("/signup", Signup).Methods("POST")
 	s.HandleFunc("/request_password_reset", RequestPasswordReset).Methods("POST")
 	s.HandleFunc("/reset_password", ResetPassword).Methods("POST")
+	s.HandleFunc("/refresh_jwt_token", RefreshJWTToken).Methods("POST")
 }
 
 func GenericAuthError(w http.ResponseWriter, err error, errorMessage string) {
@@ -87,8 +92,8 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(TokenResponse{
-		AccessToken: accessToken.TokenString, 
-		RefreshToken: refreshToken.TokenString,
+		AccessToken: accessToken, 
+		RefreshToken: refreshToken,
 	})
 }
 
@@ -98,12 +103,12 @@ func Signup(w http.ResponseWriter, r *http.Request) {
 		GenericAuthError(w, err, utils.GENERIC_LOGIN_ERROR)
 		return
 	}
-	accessToken, err := utils.CreateToken(signupAttempt.DisplayName, "access")
+	accessToken, err := utils.CreateJWTToken(signupAttempt.DisplayName, "access")
 	if err != nil {
 		GenericAuthError(w, err, utils.GENERIC_SIGNUP_ERROR)
 		return
 	}
-	refreshToken, err := utils.CreateToken(signupAttempt.DisplayName, "refresh")
+	refreshToken, err := utils.CreateJWTToken(signupAttempt.DisplayName, "refresh")
 	if err != nil {
 		GenericAuthError(w, err, utils.GENERIC_SIGNUP_ERROR)
 		return
@@ -125,8 +130,8 @@ func Signup(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(TokenResponse{
-		AccessToken: accessToken.TokenString, 
-		RefreshToken: refreshToken.TokenString,
+		AccessToken: accessToken, 
+		RefreshToken: refreshToken,
 	})
 }
 
@@ -170,5 +175,44 @@ func ResetPassword(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(StatusResponse{
 		Status: "The password has been reset if an account was found with this email! Please log in now.",
+	})
+}
+
+func RefreshJWTToken(w http.ResponseWriter, r *http.Request) {
+	refreshTokenBody, err := DecodeValidBody[RefreshTokenBody](r)
+	if err != nil {
+		GenericAuthError(w, err, utils.JWT_TOKEN_PARSING_ERROR)
+		return
+	}
+	claims, err, errMessage := utils.VerifyJWTToken(utils.REFRESH_TYPE, refreshTokenBody.TokenString)
+	if err != nil {
+		// if err, then the refresh token is not valid anymore, and you need to log in again
+		GenericAuthError(w, err, errMessage)
+		return
+	}
+	displayName, ok := claims["displayName"].(string)
+	if !ok {
+		GenericAuthError(w, err, utils.JWT_TOKEN_PARSING_ERROR)
+		return
+	}
+	newAccessToken, err := utils.CreateJWTToken(displayName, "access")
+	if err != nil {
+		GenericAuthError(w, err, utils.JWT_TOKEN_PARSING_ERROR)
+		return
+	}
+	newRefreshToken, err := utils.CreateJWTToken(displayName, "refresh")
+	if err != nil {
+		GenericAuthError(w, err, utils.JWT_TOKEN_PARSING_ERROR)
+		return
+	}
+	err, errMessage = dbhelper.ReplaceRefreshToken(displayName, refreshTokenBody.TokenString, newRefreshToken)
+	if err != nil {
+		GenericAuthError(w, err, errMessage)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(TokenResponse{
+		AccessToken: newAccessToken, 
+		RefreshToken: newRefreshToken,
 	})
 }

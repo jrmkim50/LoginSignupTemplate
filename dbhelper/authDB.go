@@ -10,13 +10,13 @@ import (
 	"strings"
 )
 
-func LoginUserWithPassword(email, password string) (utils.JWT_TOKEN, utils.JWT_TOKEN, error, string) {
+func LoginUserWithPassword(email, password string) (string, string, error, string) {
 	tx := DB.Begin()
 	defer tx.Rollback()
-	var accessToken, refreshToken utils.JWT_TOKEN
+	var accessToken, refreshToken string
 	var loginAttempts models.LoginAttempts
 	var user models.User
-	loginAttempts, err := GetLoginAttempts(tx, email)
+	loginAttempts, err := _GetLoginAttempts(tx, email)
 	if err != nil {
 		return accessToken, refreshToken, err, utils.GENERIC_LOGIN_ERROR
 	}
@@ -29,17 +29,16 @@ func LoginUserWithPassword(email, password string) (utils.JWT_TOKEN, utils.JWT_T
 	}
 	compareErr := utils.ComparePasswords(user.PasswordHash, password)
 	loginValid := loginAttempts.NumAttempts < utils.MAX_NUM_LOGIN_ATTEMPTS && result.RowsAffected > 0 && compareErr == nil
-	accessToken, err = utils.CreateToken(user.DisplayName, "access")
+	accessToken, err = utils.CreateJWTToken(user.DisplayName, "access")
 	if err != nil {
 		return accessToken, refreshToken, err, utils.GENERIC_LOGIN_ERROR
 	}
-	refreshToken, err = utils.CreateToken(user.DisplayName, "refresh")
+	refreshToken, err = utils.CreateJWTToken(user.DisplayName, "refresh")
 	if err != nil {
 		return accessToken, refreshToken, err, utils.GENERIC_LOGIN_ERROR
 	}
 	tokenObject := models.RefreshToken{
-		TokenString: refreshToken.TokenString,
-		TokenExpiresAt: refreshToken.ExpireTime,
+		TokenString: refreshToken,
 		User: user,
 	}
 	if loginValid {
@@ -63,14 +62,14 @@ func LoginUserWithPassword(email, password string) (utils.JWT_TOKEN, utils.JWT_T
 		return accessToken, refreshToken, nil, ""
 	} else {
 		if loginAttempts.NumAttempts == utils.MAX_NUM_LOGIN_ATTEMPTS {
-			errorMessage := "We had some trouble logging you in. " + utils.GenerateBanMessage(loginAttempts.BanExpiresAt)
+			errorMessage := utils.GenerateBanMessage(loginAttempts.BanExpiresAt)
 			return refreshToken, accessToken, errors.New(errorMessage), errorMessage
 		}
 		return refreshToken, accessToken, errors.New("Login unsuccessful."), utils.GENERIC_LOGIN_ERROR
 	}
 }
 
-func CreateUser(email, displayName, passwordHash string, refreshToken utils.JWT_TOKEN) (error, string) {
+func CreateUser(email, displayName, passwordHash, refreshToken string) (error, string) {
 	tx := DB.Begin()
 	defer tx.Rollback()
 	user := models.User{
@@ -92,8 +91,7 @@ func CreateUser(email, displayName, passwordHash string, refreshToken utils.JWT_
 		return result.Error, utils.GENERIC_SIGNUP_ERROR
 	}
 	tokenObject := models.RefreshToken{
-		TokenString: refreshToken.TokenString,
-		TokenExpiresAt: refreshToken.ExpireTime,
+		TokenString: refreshToken,
 		User: user,
 	}
 	result = tx.Create(&tokenObject)
@@ -109,7 +107,7 @@ func CreatePasswordResetCode(email string) (error, string) {
 	defer tx.Rollback()
 	var resetAttempts models.PasswordResetAttempts
 	var user models.User
-	resetAttempts, err := GetPasswordResetAttempts(tx, email)
+	resetAttempts, err := _GetPasswordResetAttempts(tx, email)
 	if err != nil {
 		return err, utils.GENERIC_PASSWORD_RESET_REQUEST_ERROR
 	}
@@ -146,7 +144,7 @@ func CreatePasswordResetCode(email string) (error, string) {
 	if resetAttempts.NumRequests < utils.MAX_NUM_PASS_RESET_CODES {
 		return nil, ""
 	} else {
-		errorMessage := "You've been trying to reset your password a lot. " + utils.GenerateBanMessage(resetAttempts.RequestsBanExpiresAt)
+		errorMessage := utils.GenerateBanMessage(resetAttempts.RequestsBanExpiresAt)
 		return errors.New(errorMessage), errorMessage
 	}
 }
@@ -157,7 +155,7 @@ func VerifyPasswordResetCode(email, code, passwordHash string) (error, string) {
 	var resetAttempts models.PasswordResetAttempts
 	var user models.User
 	var resetCode models.PasswordResetCode
-	resetAttempts, err := GetPasswordResetAttempts(tx, email)
+	resetAttempts, err := _GetPasswordResetAttempts(tx, email)
 	if err != nil {
 		return err, utils.GENERIC_PASSWORD_RESET_REQUEST_ERROR
 	}
@@ -185,9 +183,9 @@ func VerifyPasswordResetCode(email, code, passwordHash string) (error, string) {
 			if codeDelete.Error != nil {
 				return codeDelete.Error, utils.GENERIC_PASSWORD_RESET_ERROR
 			}
-			deleteResult := tx.Exec("DELETE FROM refresh_tokens WHERE user_id = ?", user.ID)
-			if deleteResult.Error != nil {
-				return deleteResult.Error, utils.GENERIC_PASSWORD_RESET_ERROR
+			tokenDelete := tx.Exec("DELETE FROM refresh_tokens WHERE user_id = ?", user.ID)
+			if tokenDelete.Error != nil {
+				return tokenDelete.Error, utils.GENERIC_PASSWORD_RESET_ERROR
 			}
 			// send email notifying of password change
 		} else {
@@ -203,33 +201,41 @@ func VerifyPasswordResetCode(email, code, passwordHash string) (error, string) {
 	if resetAttempts.NumAttempts < utils.MAX_NUM_PASS_RESET_ATTEMPTS {
 		return nil, ""
 	} else {
-		errorMessage := "We had some trouble resetting your password. " + utils.GenerateBanMessage(resetAttempts.AttemptsBanExpiresAt)
+		errorMessage := utils.GenerateBanMessage(resetAttempts.AttemptsBanExpiresAt)
 		return errors.New(errorMessage), errorMessage
 	}
 }
 
-func RefreshTokenExists(displayName, tokenString string) bool {
+func ReplaceRefreshToken(displayName, oldTokenString, newTokenString string) (error, string) {
 	tx := DB.Begin()
 	defer tx.Rollback()
 	var user models.User
 	var refreshToken models.RefreshToken
 	tx.Raw("SELECT * FROM users WHERE display_name = ?", displayName).Scan(&user)
 	tokenResult := tx.Raw(
-		"SELECT * FROM refresh_tokens WHERE token_string = ? AND user_id = ?", 
-		tokenString, 
+		"SELECT * FROM refresh_tokens WHERE token_string = ? AND user_id = ? FOR UPDATE", 
+		oldTokenString, 
 		user.ID,
 	).Scan(&refreshToken)
+	if tokenResult.Error != nil {
+		return tokenResult.Error, utils.SERVER_DOWN
+	}
+	tokenExists := tokenResult.RowsAffected > 0
+	refreshToken.TokenString = newTokenString
+	if tokenExists {
+		updateResult := tx.Save(&refreshToken)
+		if updateResult.Error != nil {
+			return updateResult.Error, utils.SERVER_DOWN
+		}
+	}
 	tx.Commit()
-	if tokenResult.Error != nil || tokenResult.RowsAffected == 0 {
-		return false;
+	if tokenExists {
+		return nil, "";
 	}
-	if time.Now().After(refreshToken.TokenExpiresAt) {
-		return false;
-	}
-	return true;
+	return errors.New(utils.JWT_TOKEN_PARSING_ERROR), utils.JWT_TOKEN_PARSING_ERROR;
 }
 
-func GetLoginAttempts(tx *gorm.DB, email string) (models.LoginAttempts, error) {
+func _GetLoginAttempts(tx *gorm.DB, email string) (models.LoginAttempts, error) {
 	var loginAttempts models.LoginAttempts
 	result := tx.Raw("SELECT * FROM login_attempts WHERE email = ? FOR UPDATE", email).Scan(&loginAttempts)
 	if result.Error != nil {
@@ -249,7 +255,7 @@ func GetLoginAttempts(tx *gorm.DB, email string) (models.LoginAttempts, error) {
 	return loginAttempts, nil
 }
 
-func GetPasswordResetAttempts(tx *gorm.DB, email string) (models.PasswordResetAttempts, error) {
+func _GetPasswordResetAttempts(tx *gorm.DB, email string) (models.PasswordResetAttempts, error) {
 	var resetAttempts models.PasswordResetAttempts
 	result := tx.Raw("SELECT * FROM password_reset_attempts WHERE email = ? FOR UPDATE", email).Scan(&resetAttempts)
 	if result.Error != nil {
