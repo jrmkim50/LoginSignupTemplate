@@ -235,6 +235,17 @@ func ReplaceRefreshToken(displayName, oldTokenString, newTokenString string) (er
 	return errors.New(utils.JWT_TOKEN_PARSING_ERROR), utils.JWT_TOKEN_PARSING_ERROR;
 }
 
+func UpdateDisplayName(email, newDisplayName string) (error, string) {
+	tx := DB.Begin()
+	defer tx.Rollback()
+	result := tx.Exec("UPDATE users SET display_name = ? WHERE email = ?", newDisplayName, email)
+	if result.Error != nil {
+		return result.Error, utils.SERVER_DOWN
+	}
+	tx.Commit()
+	return nil, ""
+}
+
 func _GetLoginAttempts(tx *gorm.DB, email string) (models.LoginAttempts, error) {
 	var loginAttempts models.LoginAttempts
 	result := tx.Raw("SELECT * FROM login_attempts WHERE email = ? FOR UPDATE", email).Scan(&loginAttempts)
